@@ -1,0 +1,4 @@
+name = Scripto
+description = Adds the ability to transcribe files using the Scripto library.
+core = 7.x
+configure = admin/config/scripto

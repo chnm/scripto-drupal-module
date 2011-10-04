@@ -1,0 +1,32 @@
+<?php
+/**
+ * @file
+ * Install, update, and uninstall functions for the scripto module.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function scripto_install() {
+  // Create the scripto_transcription field.
+  $field = array(
+    'field_name' => SCRIPTO_TRANSCRIPTION_FIELD_NAME,
+    'type' => 'text_long',
+    'entity_types' => array('node'),
+    'locked' => true,
+  );
+  field_create_field($field);
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function scripto_uninstall() {
+  variable_del('scripto_zend_framework_path');
+  variable_del('scripto_mediawiki_api_url');
+  variable_del('scripto_mediawiki_db_name');
+  variable_del('scripto_node_types');
+  
+  // Delete the Scripto transcription field and all its instances.
+  field_delete_field(SCRIPTO_TRANSCRIPTION_FIELD_NAME);
+}

@@ -1,0 +1,478 @@
+<?php
+/**
+ * @file
+ * Adds the ability to transcribe files using the Scripto library.
+ */
+
+define('SCRIPTO_TRANSCRIPTION_FIELD_NAME', 'scripto_transcription');
+
+/**
+ * Dumps a var directly to the browser. Used for debugging purposes only.
+ */
+function _scripto_debug($var, $exit = false) {
+  echo '<pre>' . print_r($var,true) . '</pre>';
+  if ($exit) exit;
+}
+
+/**
+ * Implements hook_help.
+ */
+function scripto_help($path, $arg) {
+  switch ($path) {
+    case 'admin/help#scripto':
+      return '<p>'.  t('Adds the ability to transcribe files using the Scripto library.') .'</p>';
+      break;
+  }
+}
+
+/**
+ * Implements hook_permission().
+ */
+function scripto_permission() {
+  return array(
+    'configure scripto' => array(
+      'title' => t('Configure Scripto'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ * 
+ * @see http://api.drupal.org/api/drupal/modules--system--system.api.php/function/hook_menu/7
+ */
+function scripto_menu() {
+  $items['scripto/transcribe'] = array(
+    'title' => 'Transcribe',
+    'description' => 'Transcribe',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('scripto_transcribe'),
+    'access arguments' => array('access content'),
+  );
+  $items['admin/config/scripto'] = array(
+    'title' => 'Configure Scripto',
+    'description' => 'Configure Scripto',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('scripto_config'),
+    'access arguments' => array('configure scripto'),
+  );
+  return $items;
+}
+
+/**
+ * Menu callback: displays the scripto module configuration form.
+ * 
+ * @see scripto_menu()
+ */
+function scripto_config() {
+  
+  $form['scripto_zend_framework_path'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Path to Zend Framework'),
+    '#description' => t('The full path, from root, to the directory containing the Zend Framework library.'),
+    '#default_value' => variable_get('scripto_zend_framework_path'),
+  );
+  $form['scripto_mediawiki_api_url'] = array(
+    '#type' => 'textfield',
+    '#title' => t('MediaWiki API URL'),
+    '#description' => t('URL to your <a href="http://www.mediawiki.org/wiki/API:Quick_start_guide#What_you_need_to_access_the_API">MediaWiki installation API</a>'),
+    '#default_value' => variable_get('scripto_mediawiki_api_url'),
+  );
+  $form['scripto_mediawiki_db_name'] = array(
+    '#type' => 'textfield',
+    '#title' => t('MediaWiki database name'),
+    '#description' => t('Name of your MediaWiki database. This is required to log in to Scripto.'),
+    '#default_value' => variable_get('scripto_mediawiki_db_name'),
+  );
+  
+  // Get all existing node types.
+  $type_names = array();
+  foreach (node_type_get_types() as $type_name => $type_info) {
+    $type_names[$type_name] = $type_info->name;
+  }
+  $form['scripto_node_types'] = array(
+    '#type' => 'checkboxes',
+    '#title' => t('Node types'),
+    '#description' => t('Check to enable transcriptions on the specified node types. All files will be transcribable. Use caution when unchecking a node type; all transcriptions that have been imported will be deleted, but they can be re-imported.'),
+    '#options' => $type_names,
+    '#default_value' => variable_get('scripto_node_types') ? variable_get('scripto_node_types') : array(),
+  );
+  
+  $form['#validate'][] = 'scripto_config_validate';
+  $form['#submit'][] = 'scripto_config_submit';
+  return system_settings_form($form);
+}
+
+/**
+ * Form validation handler for scripto_config().
+ * 
+ * @see scripto_config()
+ */
+function scripto_config_validate($form, &$form_state) {
+  $zend_framework_path = $form_state['values']['scripto_zend_framework_path'];
+  $mediawiki_api_url = $form_state['values']['scripto_mediawiki_api_url'];
+  $mediawiki_db_name = $form_state['values']['scripto_mediawiki_db_name'];
+  
+  // Don't continue to validate if the path is invalid.
+  if (!is_dir($zend_framework_path)) {
+    form_set_error('scripto_zend_framework_path', t('Invalid path to the Zend Framework library.'));
+    return;
+  }
+  
+  // Load the Scripto environment to validate the MediaWiki API URL.
+  set_include_path(get_include_path() 
+                 . PATH_SEPARATOR . $zend_framework_path 
+                 . PATH_SEPARATOR . _scripto_get_scripto_path());
+  require_once 'Scripto.php';
+  if (!Scripto::isValidApiUrl($mediawiki_api_url)) {
+    form_set_error('scripto_mediawiki_api_url', t('Invalid MediaWiki API URL.'));
+  }
+  
+  if (!$mediawiki_db_name) {
+    form_set_error('scripto_mediawiki_db_name', t('Invalid MediaWiki database name.'));
+  }
+}
+
+/**
+ * Form submission handler for scripto_config().
+ * 
+ * @see scripto_config()
+ */
+function scripto_config_submit($form, &$form_state) {
+  variable_set('scripto_zend_framework_path', $form_state['values']['scripto_zend_framework_path']);
+  variable_set('scripto_mediawiki_api_url', $form_state['values']['scripto_mediawiki_api_url']);
+  variable_set('scripto_mediawiki_db_name', $form_state['values']['scripto_mediawiki_db_name']);
+  variable_set('scripto_node_types', $form_state['values']['scripto_node_types']);
+  
+  // Build an array of all node types that have an instance of the 
+  // scripto_transcription field.
+  $types_with_instance = array();
+  $field_instances = field_info_instances();
+  foreach ($field_instances['node'] as $type_name => $type) {
+    foreach ($type as $field_name => $field) {
+      if (SCRIPTO_TRANSCRIPTION_FIELD_NAME == $field_name) {
+        $types_with_instance[] = $type_name;
+      }
+    }
+  }
+  
+  // Iterate the node type checklist.
+  foreach ($form_state['values']['scripto_node_types'] as $type_name => $result) {
+    
+    // Build the instance structure.
+    $instance = array(
+      'field_name' => SCRIPTO_TRANSCRIPTION_FIELD_NAME,
+      'label' => 'Scripto transcription',
+      'entity_type' => 'node',
+      'bundle' => $type_name,
+      'required' => false,
+    );
+    
+    // Delete/ignore the instance if it was not selected. 
+    if (0 === $result) {
+      field_delete_instance($instance, false);
+      continue;
+    }
+    
+    // Do not re-create the instance.
+    if (in_array($type_name, $types_with_instance)) {
+      continue;
+    }
+    
+    // Create the instance.
+    field_create_instance($instance);
+  }
+}
+
+/**
+ * Menu callback: displays the scripto module transcription form.
+ * 
+ * @see scripto_menu().
+ * @see http://drupal.org/node/751826
+ */
+function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
+  
+  //drupal_add_js('misc/jquery.js');
+  $scripto = _scripto_get_scripto();
+  $doc = $scripto->getDocument($node_id);
+  $doc->setPage($file_id);
+  
+  // Get the media viewer markup.
+  $file = file_load($file_id);
+  
+  // Zoom.it image viewer.
+  if (in_array($file->filemime, _scripto_get_filemime_zoomit())) {
+    $url = url('http://api.zoom.it/v1/content/', array('query' => array('url' => file_create_url($file->uri))));
+    $response = drupal_http_request($url);
+    $html = json_decode($response->data)->embedHtml;
+  
+  // Google Docs document viewer.
+  } else if (in_array($file->filemime, _scripto_get_filemime_googledocs())) {
+      $url = url('http://docs.google.com/viewer', array('query' => array('url' => file_create_url($file->uri), 'embed' => 'true')));
+      $html = '<iframe src="http://docs.google.com/viewer?embedded=true&url=' . urlencode($url) . '" width="500" height="600" style="border: none;"></iframe>';
+  
+  // No media viewer.
+  } else {
+    $html = '<p>No media viewer is available for ' . $file->filemime . ' files. <a href="' . file_create_url($file->uri) . '" target="_blank">Click here</a> to open the file manually.</p>';
+  }
+  
+  // Build the transcription form.
+  $form['media_viewer'] = array('#markup' => $html);
+  $form['transcription'] = array(
+    '#type' => 'textarea',
+    '#title' => t('Transcription'),
+    '#default_value' =>  $doc->getTranscriptionPageWikitext(),
+    '#cols' => 60,
+    '#rows' => 10,
+    //'#description' => t(''),
+  );
+  
+  // @see http://drupal.org/node/751826 under "Submitting Forms" to see why the 
+  // two values below count as hidden fields.
+  $form['node_id'] = array('#type' => 'value', '#value' => $node_id);
+  $form['file_id'] = array('#type' => 'value', '#value' => $file_id);
+  
+  $form['submit'] = array('#type' => 'submit', '#value' => t('Save Transcription'));
+  $form['#submit'][] = 'scripto_translate_submit';
+  return $form;
+}
+
+/**
+ * Form submission handler for scripto_transcribe().
+ * 
+ * @see scripto_transcribe()
+ */
+function scripto_translate_submit($form, &$form_state) {
+  $scripto = _scripto_get_scripto();
+  $doc = $scripto->getDocument($form_state['values']['node_id']);
+  $doc->setPage($form_state['values']['file_id']);
+  $doc->editTranscriptionPage($form_state['values']['transcription']);
+}
+
+/**
+ * Implements hook_field_attach_view_alter().
+ * 
+ * Injects "transcribe this" links into file and image field type formatters. 
+ * For our purposes, the Scripto document ID is the Drupal node ID and the 
+ * Scripto document page ID is the Drupal file ID. The file and image fields 
+ * use file ID as the unique identifier.
+ */
+function scripto_field_attach_view_alter(&$output, $context) {
+  
+  // Alter only fields in the right context.
+  if ('node' != $context['entity_type'] || 'full' != $context['display'] || 'full' != $context['view_mode']) {
+      return;
+  }
+  
+  // Iterate the fields in this node.
+  foreach (element_children($output) as $field_name) {
+    $element = &$output[$field_name];
+    
+    // Alter only file and image fields.
+    if ('field' != $element['#theme'] || !in_array($element['#field_type'], array('file', 'image'))) {
+      continue;
+    }
+      
+    // Iterate the items in this field.
+    foreach (element_children($element) as $item_key) {
+      $item = &$element[$item_key];
+      
+      // Inject a transcribe link into the default file formatter.
+      if ('file' == $element['#field_type']) {
+        $url = url('scripto/transcribe/' . $context['entity']->nid . '/' . $item['#file']->fid);
+        unset($item['#theme']);
+        $item['#markup'] = theme_file_link(array(
+          'file' => $item['#file'],
+          'icon_directory' => null,
+        )) . ' (<a href="' . $url . '">' . t('transcribe this') . '</a>)';
+      }
+      
+      // Inject a transcribe link into the default image formatter.
+      if ('image' == $element['#field_type']) {
+        $url = url('scripto/transcribe/' . $context['entity']->nid . '/' . $item['#item']['fid']);
+        unset($item['#theme']);
+        // @see theme_image_style() in image.module
+        // @see theme_image() in includes/theme.inc
+        $item['#markup'] = theme_image(array(
+          'path' => image_style_url($item['#image_style'], $item['#item']['uri']),
+          'alt' => $item['#item']['alt'],
+          'title' => $item['#item']['title'],
+          'attributes' => array(),
+        )) . '<br />(<a href="' . $url . '">' . t('transcribe this') . '</a>)';
+      }
+    }
+  }
+}
+
+/**
+ * Implements hook_node_view().
+ * 
+ * Currently replaced by scripto_field_attach_view_alter(). Adds transcribe 
+ * links for every file assigned to this node. Not an optimal solution since it 
+ * eshews the Drupal API by quering the database directly. However, one 
+ * advantage of this is that there's no need to inject HTML into the configured 
+ * field formatter.
+ * 
+ * Comment out but don't delete this function until it's obviously not needed.
+ */
+/*
+function scripto_node_view($node, $view_mode, $langcode) {
+  
+  $scripto_files = array();
+  
+  // Get all active file field instances with this node's bundle type (e.g. 
+  // article, page).
+  $sql = '
+  SELECT * 
+  FROM {field_config} fc 
+  JOIN {field_config_instance} fci 
+  ON fc.id = fci.field_id 
+  WHERE fc.module = :file 
+  AND fc.type = :file 
+  AND fc.active = 1 
+  AND fci.entity_type = :node 
+  AND fci.bundle = :bundle';
+  $result = db_query($sql, array(':file' => 'file', ':node' => 'node', ':bundle' => $node->type));
+  
+  // Iterate the field instances and build an array containing field data and 
+  // data about all files related to those fields.
+  foreach ($result->fetchAll() as $field) {
+    $sql = "
+    SELECT * 
+    FROM {file_usage} fu 
+    JOIN {file_managed} fm 
+    ON fu.fid = fm.fid 
+    JOIN {field_data_{$field->field_name}} fd
+    ON fu.fid = fd.{$field->field_name}_fid 
+    WHERE fu.module = :file 
+    AND fu.type = :node 
+    AND fu.id = :nodeid
+    ORDER BY fd.delta";
+    $result = db_query($sql, array(':file' => 'file', ':node' => 'node', ':nodeid' => $node->nid));
+    $files = $result->fetchAll();
+    
+    $scripto_files[$field->field_name] = $field;
+    $scripto_files[$field->field_name]->data = unserialize($field->data);
+    $scripto_files[$field->field_name]->files = $files;
+  }
+  
+  // Generate an HTML list of all files assigned to this node..
+  $html = '<div>';
+  $html .= '<h3>Translate these files</h3>';
+  foreach ($scripto_files as $scripto_files) {
+    $html .= '<div>' . $scripto_files->data['label'] . ':</div>';
+    $html .= '<ol>';
+    foreach ($scripto_files->files as $file) {
+      $url = url('scripto/transcribe', array('query' => array('nid' => $file->id, 'fid' => $file->fid)));
+      $html .= '<li><a href="' . $url . '">' . $file->filename . '</a></li>';
+    }
+    $html .= '</ol>';
+  }
+  $html .= '</div>';
+  
+  // Add the HTML to the node view.
+  $node->content['scripto_file_list'] = array(
+    '#markup' => $html,
+    '#weight' => 20,
+  );
+}
+*/
+
+/**
+ * Load the Scripto environment and return a Scripto object.
+ */
+function _scripto_get_scripto() {
+  
+  set_include_path(get_include_path() 
+                 . PATH_SEPARATOR . variable_get('scripto_zend_framework_path') 
+                 . PATH_SEPARATOR . _scripto_get_scripto_path());
+  
+  require_once 'Scripto.php';
+  require_once 'ScriptoAdapterDrupal.php';
+  $scripto = new Scripto(new ScriptoAdapterDrupal, 
+                         array('api_url' => variable_get('scripto_mediawiki_api_url'), 
+                               'db_name' => variable_get('scripto_mediawiki_db_name')));
+  return $scripto;
+}
+
+/**
+ * Return the path to the directory containing the Scripto library.
+ */
+function _scripto_get_scripto_path() {
+  return realpath(drupal_get_path('module', 'scripto')) . '/lib';
+}
+
+function _scripto_get_filemime_zoomit() {
+  return array(
+    // gif
+    'image/gif', 'image/x-xbitmap', 'image/gi_', 
+    // jpg
+    'image/jpeg', 'image/jpg', 'image/jpe_', 'image/pjpeg', 
+    'image/vnd.swiftview-jpeg', 
+    // png
+    'image/png', 'application/png', 'application/x-png', 
+    // bmp
+    'image/bmp', 'image/x-bmp', 'image/x-bitmap', 
+    'image/x-xbitmap', 'image/x-win-bitmap', 
+    'image/x-windows-bmp', 'image/ms-bmp', 'image/x-ms-bmp', 
+    'application/bmp', 'application/x-bmp', 
+    'application/x-win-bitmap', 
+    // ico
+    'image/ico', 'image/x-icon', 'application/ico', 'application/x-ico', 
+    'application/x-win-bitmap', 'image/x-win-bitmap', 
+    // tiff
+    'image/tiff', 
+  );
+}
+
+function _scripto_get_filemime_googledocs() {
+  return array(
+    // pdf
+    'application/pdf', 'application/x-pdf', 
+    'application/acrobat', 'applications/vnd.pdf', 'text/pdf', 
+    'text/x-pdf', 
+    // docx
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 
+    // doc
+    'application/msword', 'application/doc', 'appl/text', 
+    'application/vnd.msword', 'application/vnd.ms-word', 
+    'application/winword', 'application/word', 'application/vnd.ms-office', 
+    'application/x-msw6', 'application/x-msword', 
+    // ppt
+    'application/vnd.ms-powerpoint', 'application/mspowerpoint', 
+    'application/ms-powerpoint', 'application/mspowerpnt', 
+    'application/vnd-mspowerpoint', 'application/powerpoint', 
+    'application/x-powerpoint', 'application/x-m', 
+    // pptx
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation', 
+    // xls
+    'application/vnd.ms-excel', 'application/msexcel', 
+    'application/x-msexcel', 'application/x-ms-excel', 
+    'application/vnd.ms-excel', 'application/x-excel', 
+    'application/x-dos_ms_excel', 'application/xls', 
+    // xlsx
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 
+    // tiff
+    'image/tiff', 
+    // ps, ai
+    'application/postscript', 'application/ps', 
+    'application/x-postscript', 'application/x-ps', 
+    'text/postscript', 'application/x-postscript-not-eps', 
+    // eps
+    'application/eps', 'application/x-eps', 'image/eps', 
+    'image/x-eps', 
+    // psd
+    'image/vnd.adobe.photoshop', 'image/photoshop', 
+    'image/x-photoshop', 'image/psd', 'application/photoshop', 
+    'application/psd', 'zz-application/zz-winassoc-psd', 
+    // dxf
+    'application/dxf', 'application/x-autocad', 
+    'application/x-dxf', 'drawing/x-dxf', 'image/vnd.dxf', 
+    'image/x-autocad', 'image/x-dxf', 
+    'zz-application/zz-winassoc-dxf', 
+    // xvg
+    'image/svg+xml', 
+    // xps
+    'application/vnd.ms-xpsdocument', 
+  );
+}
