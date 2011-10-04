@@ -259,8 +259,15 @@ function scripto_translate_submit($form, &$form_state) {
  */
 function scripto_field_attach_view_alter(&$output, $context) {
   
-  // Alter only fields in the right context.
-  if ('node' != $context['entity_type'] || 'full' != $context['display'] || 'full' != $context['view_mode']) {
+  $scripto_transcription = SCRIPTO_TRANSCRIPTION_FIELD_NAME;
+  
+  // Alter only fields in the right context. The entity must be a node, the 
+  // display and view mode must be set to full, and a scripto_transcription 
+  // field instance must be assigned to the node.
+  if ('node' != $context['entity_type'] 
+      || 'full' != $context['display'] 
+      || 'full' != $context['view_mode'] 
+      || !isset($context['entity']->$scripto_transcription)) {
       return;
   }
   
