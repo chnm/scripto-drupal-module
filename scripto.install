@@ -10,7 +10,7 @@
 function scripto_install() {
   // Create the scripto_transcription field.
   $field = array(
-    'field_name' => SCRIPTO_TRANSCRIPTION_FIELD_NAME,
+    'field_name' => 'scripto_transcription',
     'type' => 'text_long',
     'entity_types' => array('node'),
     'locked' => true,
@@ -28,5 +28,5 @@ function scripto_uninstall() {
   variable_del('scripto_node_types');
   
   // Delete the Scripto transcription field and all its instances.
-  field_delete_field(SCRIPTO_TRANSCRIPTION_FIELD_NAME);
+  field_delete_field('scripto_transcription');
 }

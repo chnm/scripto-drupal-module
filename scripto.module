@@ -4,8 +4,6 @@
  * Adds the ability to transcribe files using the Scripto library.
  */
 
-define('SCRIPTO_TRANSCRIPTION_FIELD_NAME', 'scripto_transcription');
-
 /**
  * Dumps a var directly to the browser. Used for debugging purposes only.
  */
@@ -33,13 +31,14 @@ function scripto_permission() {
     'configure scripto' => array(
       'title' => t('Configure Scripto'),
     ),
+    'import transcriptions' => array(
+      'title' => t('Import Transcriptions'),
+    )
   );
 }
 
 /**
  * Implements hook_menu().
- * 
- * @see http://api.drupal.org/api/drupal/modules--system--system.api.php/function/hook_menu/7
  */
 function scripto_menu() {
   $items['scripto/transcribe'] = array(
@@ -48,6 +47,7 @@ function scripto_menu() {
     'page callback' => 'drupal_get_form',
     'page arguments' => array('scripto_transcribe'),
     'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
   );
   $items['admin/config/scripto'] = array(
     'title' => 'Configure Scripto',
@@ -150,7 +150,7 @@ function scripto_config_submit($form, &$form_state) {
   $field_instances = field_info_instances();
   foreach ($field_instances['node'] as $type_name => $type) {
     foreach ($type as $field_name => $field) {
-      if (SCRIPTO_TRANSCRIPTION_FIELD_NAME == $field_name) {
+      if ('scripto_transcription' == $field_name) {
         $types_with_instance[] = $type_name;
       }
     }
@@ -161,7 +161,7 @@ function scripto_config_submit($form, &$form_state) {
     
     // Build the instance structure.
     $instance = array(
-      'field_name' => SCRIPTO_TRANSCRIPTION_FIELD_NAME,
+      'field_name' => 'scripto_transcription',
       'label' => 'Scripto transcription',
       'entity_type' => 'node',
       'bundle' => $type_name,
@@ -188,7 +188,6 @@ function scripto_config_submit($form, &$form_state) {
  * Menu callback: displays the scripto module transcription form.
  * 
  * @see scripto_menu().
- * @see http://drupal.org/node/751826
  */
 function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
   
@@ -231,9 +230,9 @@ function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
   // two values below count as hidden fields.
   $form['node_id'] = array('#type' => 'value', '#value' => $node_id);
   $form['file_id'] = array('#type' => 'value', '#value' => $file_id);
-  
+    
   $form['submit'] = array('#type' => 'submit', '#value' => t('Save Transcription'));
-  $form['#submit'][] = 'scripto_translate_submit';
+  $form['#submit'][] = 'scripto_transcribe_submit';
   return $form;
 }
 
@@ -242,11 +241,55 @@ function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
  * 
  * @see scripto_transcribe()
  */
-function scripto_translate_submit($form, &$form_state) {
+function scripto_transcribe_submit($form, &$form_state) {
   $scripto = _scripto_get_scripto();
   $doc = $scripto->getDocument($form_state['values']['node_id']);
   $doc->setPage($form_state['values']['file_id']);
   $doc->editTranscriptionPage($form_state['values']['transcription']);
+}
+
+/**
+ * Implementation of hook_node_view_alter().
+ * 
+ * Adds an access-protected import transcription button onto the current node.
+ */
+function scripto_node_view_alter(&$build) {
+  
+  if ('node' != $build['#entity_type'] 
+      || 'full' != $build['#view_mode'] 
+      || !isset($build['#node']->scripto_transcription)) {
+    return;
+  }
+  
+  if (user_access('import transcriptions')) {
+    $build['import_transcription'] = drupal_get_form('scripto_import_transcription', $build['#node']->nid);
+  }
+}
+
+/**
+ * Node build callback: displays the scripto module import transcription form.
+ * 
+ * @see scripto_menu().
+ */
+function scripto_import_transcription($form, &$form_state, $node_id) {
+  $form['node_id'] = array('#type' => 'value', '#value' => $node_id);
+  $form['submit'] = array('#type' => 'submit', '#value' => t('Import All Transcriptions'));
+  $form['#submit'][] = 'scripto_import_transcription_submit';
+  return $form;
+}
+
+/**
+ * Form submission handler for scripto_import_transcription().
+ * 
+ * @see scripto_import_transcription()
+ */
+function scripto_import_transcription_submit($form, &$form_state) {
+  if (!user_access('import transcriptions')) {
+    return;
+  }
+  $scripto = _scripto_get_scripto();
+  $doc = $scripto->getDocument($form_state['values']['node_id']);
+  _scripto_debug($doc,1);
 }
 
 /**
@@ -259,15 +302,12 @@ function scripto_translate_submit($form, &$form_state) {
  */
 function scripto_field_attach_view_alter(&$output, $context) {
   
-  $scripto_transcription = SCRIPTO_TRANSCRIPTION_FIELD_NAME;
-  
-  // Alter only fields in the right context. The entity must be a node, the 
-  // display and view mode must be set to full, and a scripto_transcription 
-  // field instance must be assigned to the node.
+  // Alter only fields in the right context. The entity must be a node, the view 
+  // mode must be set to full, and a scripto_transcription field instance must 
+  // be assigned to the node.
   if ('node' != $context['entity_type'] 
-      || 'full' != $context['display'] 
       || 'full' != $context['view_mode'] 
-      || !isset($context['entity']->$scripto_transcription)) {
+      || !isset($context['entity']->scripto_transcription)) {
       return;
   }
   

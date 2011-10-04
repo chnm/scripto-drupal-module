@@ -54,6 +54,8 @@ class ScriptoAdapterDrupal implements Scripto_Adapter_Interface {
   
   public function getDocumentPages($documentId) {
     $node = node_load($documentId);
+    // Get all file and image fields for this node. Consider the current field 
+    // and cardinality order as the canonical order.
     return;
   }
   
