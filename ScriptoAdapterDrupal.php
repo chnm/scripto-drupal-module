@@ -54,9 +54,11 @@ class ScriptoAdapterDrupal implements Scripto_Adapter_Interface {
   
   public function getDocumentPages($documentId) {
     $node = node_load($documentId);
-    // Get all file and image fields for this node. Consider the current field 
-    // and cardinality order as the canonical order.
-    return;
+    $pages = array();
+    foreach (_scripto_get_pages($node) as $page) {
+      $pages[$page['fid']] = $page['filename'];
+    }
+    return $pages;
   }
   
   public function getDocumentPageFileUrl($documentId, $pageId) {
@@ -92,6 +94,10 @@ class ScriptoAdapterDrupal implements Scripto_Adapter_Interface {
   }
 
   public function importDocumentTranscription($documentId, $text) {
-    
+    $node = node_load($documentId);
+    // HOW DO I SAVE FIELD DATA TO A NODE?
+    // see drupal_write_record() http://api.drupal.org/api/drupal/includes--common.inc/function/drupal_write_record/8
+    // see field.attach.inc, field_attach_update() http://api.drupal.org/api/drupal/modules--field--field.attach.inc/function/field_attach_update/7
+    _scripto_debug($node,1);
   }
 }

@@ -5,14 +5,6 @@
  */
 
 /**
- * Dumps a var directly to the browser. Used for debugging purposes only.
- */
-function _scripto_debug($var, $exit = false) {
-  echo '<pre>' . print_r($var,true) . '</pre>';
-  if ($exit) exit;
-}
-
-/**
  * Implements hook_help.
  */
 function scripto_help($path, $arg) {
@@ -30,10 +22,12 @@ function scripto_permission() {
   return array(
     'configure scripto' => array(
       'title' => t('Configure Scripto'),
+      'description' => 'Perform administration tasks for the Scripto module.',
     ),
     'import transcriptions' => array(
-      'title' => t('Import Transcriptions'),
-    )
+      'title' => t('Import transcriptions'),
+      'description' => 'Import node transcriptions from MediaWiki to Drupal.',
+    ),
   );
 }
 
@@ -191,7 +185,6 @@ function scripto_config_submit($form, &$form_state) {
  */
 function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
   
-  //drupal_add_js('misc/jquery.js');
   $scripto = _scripto_get_scripto();
   $doc = $scripto->getDocument($node_id);
   $doc->setPage($file_id);
@@ -223,7 +216,6 @@ function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
     '#default_value' =>  $doc->getTranscriptionPageWikitext(),
     '#cols' => 60,
     '#rows' => 10,
-    //'#description' => t(''),
   );
   
   // @see http://drupal.org/node/751826 under "Submitting Forms" to see why the 
@@ -250,17 +242,32 @@ function scripto_transcribe_submit($form, &$form_state) {
 
 /**
  * Implementation of hook_node_view_alter().
- * 
- * Adds an access-protected import transcription button onto the current node.
  */
 function scripto_node_view_alter(&$build) {
   
-  if ('node' != $build['#entity_type'] 
-      || 'full' != $build['#view_mode'] 
-      || !isset($build['#node']->scripto_transcription)) {
+  // Only nodes with the scripto_transcription field can be transcribed.
+  if ('full' != $build['#view_mode'] || !isset($build['#node']->scripto_transcription)) {
     return;
   }
   
+  // Add a list of links to transcription pages for all files and images 
+  // assigned to this node. Assume current order is the correct page order.
+  $items = _scripto_get_pages($build['#node']);
+  
+  // Build the markup.
+  $html = '<h3>Transcribe</h3>';
+  $html .= '<ol>';
+  foreach ($items as $item) {
+    $url = url('scripto/transcribe/' . $build['#node']->nid . '/' . $item['fid']);
+    $html .= '<li><a href="' . $url . '">' . $item['filename'] . '</a></li>';
+  }
+  $html .= '</ol>';
+  $build['transcription_page_list'] = array(
+    '#markup' => $html, 
+    '#weight' => 20,
+  );
+  
+  // Add an access-protected import transcription button
   if (user_access('import transcriptions')) {
     $build['import_transcription'] = drupal_get_form('scripto_import_transcription', $build['#node']->nid);
   }
@@ -275,6 +282,7 @@ function scripto_import_transcription($form, &$form_state, $node_id) {
   $form['node_id'] = array('#type' => 'value', '#value' => $node_id);
   $form['submit'] = array('#type' => 'submit', '#value' => t('Import All Transcriptions'));
   $form['#submit'][] = 'scripto_import_transcription_submit';
+  $form['#weight'] = '20';
   return $form;
 }
 
@@ -289,141 +297,16 @@ function scripto_import_transcription_submit($form, &$form_state) {
   }
   $scripto = _scripto_get_scripto();
   $doc = $scripto->getDocument($form_state['values']['node_id']);
-  _scripto_debug($doc,1);
+  $doc->export();
 }
 
 /**
- * Implements hook_field_attach_view_alter().
- * 
- * Injects "transcribe this" links into file and image field type formatters. 
- * For our purposes, the Scripto document ID is the Drupal node ID and the 
- * Scripto document page ID is the Drupal file ID. The file and image fields 
- * use file ID as the unique identifier.
+ * Dumps a var directly to the browser. Used for debugging purposes only.
  */
-function scripto_field_attach_view_alter(&$output, $context) {
-  
-  // Alter only fields in the right context. The entity must be a node, the view 
-  // mode must be set to full, and a scripto_transcription field instance must 
-  // be assigned to the node.
-  if ('node' != $context['entity_type'] 
-      || 'full' != $context['view_mode'] 
-      || !isset($context['entity']->scripto_transcription)) {
-      return;
-  }
-  
-  // Iterate the fields in this node.
-  foreach (element_children($output) as $field_name) {
-    $element = &$output[$field_name];
-    
-    // Alter only file and image fields.
-    if ('field' != $element['#theme'] || !in_array($element['#field_type'], array('file', 'image'))) {
-      continue;
-    }
-      
-    // Iterate the items in this field.
-    foreach (element_children($element) as $item_key) {
-      $item = &$element[$item_key];
-      
-      // Inject a transcribe link into the default file formatter.
-      if ('file' == $element['#field_type']) {
-        $url = url('scripto/transcribe/' . $context['entity']->nid . '/' . $item['#file']->fid);
-        unset($item['#theme']);
-        $item['#markup'] = theme_file_link(array(
-          'file' => $item['#file'],
-          'icon_directory' => null,
-        )) . ' (<a href="' . $url . '">' . t('transcribe this') . '</a>)';
-      }
-      
-      // Inject a transcribe link into the default image formatter.
-      if ('image' == $element['#field_type']) {
-        $url = url('scripto/transcribe/' . $context['entity']->nid . '/' . $item['#item']['fid']);
-        unset($item['#theme']);
-        // @see theme_image_style() in image.module
-        // @see theme_image() in includes/theme.inc
-        $item['#markup'] = theme_image(array(
-          'path' => image_style_url($item['#image_style'], $item['#item']['uri']),
-          'alt' => $item['#item']['alt'],
-          'title' => $item['#item']['title'],
-          'attributes' => array(),
-        )) . '<br />(<a href="' . $url . '">' . t('transcribe this') . '</a>)';
-      }
-    }
-  }
+function _scripto_debug($var, $exit = false) {
+  echo '<pre>' . print_r($var,true) . '</pre>';
+  if ($exit) exit;
 }
-
-/**
- * Implements hook_node_view().
- * 
- * Currently replaced by scripto_field_attach_view_alter(). Adds transcribe 
- * links for every file assigned to this node. Not an optimal solution since it 
- * eshews the Drupal API by quering the database directly. However, one 
- * advantage of this is that there's no need to inject HTML into the configured 
- * field formatter.
- * 
- * Comment out but don't delete this function until it's obviously not needed.
- */
-/*
-function scripto_node_view($node, $view_mode, $langcode) {
-  
-  $scripto_files = array();
-  
-  // Get all active file field instances with this node's bundle type (e.g. 
-  // article, page).
-  $sql = '
-  SELECT * 
-  FROM {field_config} fc 
-  JOIN {field_config_instance} fci 
-  ON fc.id = fci.field_id 
-  WHERE fc.module = :file 
-  AND fc.type = :file 
-  AND fc.active = 1 
-  AND fci.entity_type = :node 
-  AND fci.bundle = :bundle';
-  $result = db_query($sql, array(':file' => 'file', ':node' => 'node', ':bundle' => $node->type));
-  
-  // Iterate the field instances and build an array containing field data and 
-  // data about all files related to those fields.
-  foreach ($result->fetchAll() as $field) {
-    $sql = "
-    SELECT * 
-    FROM {file_usage} fu 
-    JOIN {file_managed} fm 
-    ON fu.fid = fm.fid 
-    JOIN {field_data_{$field->field_name}} fd
-    ON fu.fid = fd.{$field->field_name}_fid 
-    WHERE fu.module = :file 
-    AND fu.type = :node 
-    AND fu.id = :nodeid
-    ORDER BY fd.delta";
-    $result = db_query($sql, array(':file' => 'file', ':node' => 'node', ':nodeid' => $node->nid));
-    $files = $result->fetchAll();
-    
-    $scripto_files[$field->field_name] = $field;
-    $scripto_files[$field->field_name]->data = unserialize($field->data);
-    $scripto_files[$field->field_name]->files = $files;
-  }
-  
-  // Generate an HTML list of all files assigned to this node..
-  $html = '<div>';
-  $html .= '<h3>Translate these files</h3>';
-  foreach ($scripto_files as $scripto_files) {
-    $html .= '<div>' . $scripto_files->data['label'] . ':</div>';
-    $html .= '<ol>';
-    foreach ($scripto_files->files as $file) {
-      $url = url('scripto/transcribe', array('query' => array('nid' => $file->id, 'fid' => $file->fid)));
-      $html .= '<li><a href="' . $url . '">' . $file->filename . '</a></li>';
-    }
-    $html .= '</ol>';
-  }
-  $html .= '</div>';
-  
-  // Add the HTML to the node view.
-  $node->content['scripto_file_list'] = array(
-    '#markup' => $html,
-    '#weight' => 20,
-  );
-}
-*/
 
 /**
  * Load the Scripto environment and return a Scripto object.
@@ -449,6 +332,25 @@ function _scripto_get_scripto_path() {
   return realpath(drupal_get_path('module', 'scripto')) . '/lib';
 }
 
+/**
+ * Returns all the pages (files and images) of a node, in current order.
+ */
+function _scripto_get_pages($node) {
+  $items = array();
+  $fields = field_read_fields(array('type' => array('file', 'image')));
+  foreach ($node as $key => $value) {
+    // Only process file and image fields.
+    if (!array_key_exists($key, $fields)) {
+      continue;
+    }
+    $items = array_merge($items, field_get_items('node', $node, $key));
+  }
+  return $items;
+}
+
+/**
+ * Returns an array of MIME types compatible with the Zoom.it image viewer.
+ */
 function _scripto_get_filemime_zoomit() {
   return array(
     // gif
@@ -472,6 +374,10 @@ function _scripto_get_filemime_zoomit() {
   );
 }
 
+/**
+ * Returns an array of MIME types compatible with the Google Docs document 
+ * viewer.
+ */
 function _scripto_get_filemime_googledocs() {
   return array(
     // pdf
