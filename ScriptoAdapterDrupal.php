@@ -82,22 +82,28 @@ class ScriptoAdapterDrupal implements Scripto_Adapter_Interface {
   }
   
   public function documentTranscriptionIsImported($documentId) {
-    
+    return false;
   }
   
   public function documentPageTranscriptionIsImported($documentId, $pageId) {
-    
+    return false;
   }
   
   public function importDocumentPageTranscription($documentId, $pageId, $text) {
-    
+    return false;
   }
 
   public function importDocumentTranscription($documentId, $text) {
     $node = node_load($documentId);
-    // HOW DO I SAVE FIELD DATA TO A NODE?
-    // see drupal_write_record() http://api.drupal.org/api/drupal/includes--common.inc/function/drupal_write_record/8
-    // see field.attach.inc, field_attach_update() http://api.drupal.org/api/drupal/modules--field--field.attach.inc/function/field_attach_update/7
-    _scripto_debug($node,1);
+    
+    // Build the long_text field structure.
+    $node->scripto_transcription[$node->language][0] = array(
+      'value' => $text,
+      'format' => null,
+      'safe_value' => null,
+    );
+    
+    // Update the node with the new text.
+    field_attach_update('node', $node);
   }
 }
