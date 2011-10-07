@@ -37,7 +37,6 @@ function scripto_permission() {
 function scripto_menu() {
   $items['scripto/transcribe'] = array(
     'title' => 'Transcribe',
-    'description' => 'Transcribe',
     'page callback' => 'drupal_get_form',
     'page arguments' => array('scripto_transcribe'),
     'access arguments' => array('access content'),
@@ -45,7 +44,6 @@ function scripto_menu() {
   );
   $items['admin/config/scripto'] = array(
     'title' => 'Configure Scripto',
-    'description' => 'Configure Scripto',
     'page callback' => 'drupal_get_form',
     'page arguments' => array('scripto_config'),
     'access arguments' => array('configure scripto'),
@@ -94,6 +92,7 @@ function scripto_config() {
   
   $form['#validate'][] = 'scripto_config_validate';
   $form['#submit'][] = 'scripto_config_submit';
+  
   return system_settings_form($form);
 }
 
@@ -156,7 +155,7 @@ function scripto_config_submit($form, &$form_state) {
     // Build the instance structure.
     $instance = array(
       'field_name' => 'scripto_transcription',
-      'label' => 'Scripto transcription',
+      'label' => 'Transcription',
       'entity_type' => 'node',
       'bundle' => $type_name,
       'required' => false,
@@ -185,11 +184,13 @@ function scripto_config_submit($form, &$form_state) {
  */
 function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
   
+  // Set the Scripto document and page.
   $scripto = _scripto_get_scripto();
   $doc = $scripto->getDocument($node_id);
   $doc->setPage($file_id);
   
-  // Get the media viewer markup.
+  // Get the node and file objects.
+  $node = node_load($node_id);
   $file = file_load($file_id);
   
   // Zoom.it image viewer.
@@ -209,22 +210,23 @@ function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
   }
   
   // Build the transcription form.
+  $form['node_title'] = array('#markup' => '<h2><a href="' . url('node/' .$node_id) . '">' . $node->title . '</a>: ' . $file->filename . '</h2>');
   $form['media_viewer'] = array('#markup' => $html);
   $form['transcription'] = array(
     '#type' => 'textarea',
     '#title' => t('Transcription'),
     '#default_value' =>  $doc->getTranscriptionPageWikitext(),
     '#cols' => 60,
-    '#rows' => 10,
+    '#rows' => 16,
   );
-  
   // @see http://drupal.org/node/751826 under "Submitting Forms" to see why the 
   // two values below count as hidden fields.
   $form['node_id'] = array('#type' => 'value', '#value' => $node_id);
   $form['file_id'] = array('#type' => 'value', '#value' => $file_id);
-    
   $form['submit'] = array('#type' => 'submit', '#value' => t('Save Transcription'));
+  $form['current_transcription'] = array('#markup' => '<h2>Current Transcription</h2>' . $doc->getTranscriptionPageHtml());
   $form['#submit'][] = 'scripto_transcribe_submit';
+  
   return $form;
 }
 
@@ -297,7 +299,9 @@ function scripto_import_transcription_submit($form, &$form_state) {
   }
   $scripto = _scripto_get_scripto();
   $doc = $scripto->getDocument($form_state['values']['node_id']);
-  $doc->export();
+  
+  // Export in HTML to preserve formatting.
+  $doc->export('html');
 }
 
 /**

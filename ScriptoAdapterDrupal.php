@@ -1,14 +1,6 @@
 <?php
 require_once 'Scripto/Adapter/Interface.php';
 
-/**
- * @todo self::getDocumentPages()
- * @todo self::getDocumentFirstPageId()
- * @todo self::documentTranscriptionIsImported()
- * @todo self::documentPageTranscriptionIsImported()
- * @todo self::importDocumentPageTranscription()
- * @todo self::importDocumentTranscription()
- */
 class ScriptoAdapterDrupal implements Scripto_Adapter_Interface {
   
   public function documentExists($documentId) {
@@ -67,7 +59,6 @@ class ScriptoAdapterDrupal implements Scripto_Adapter_Interface {
   }
   
   public function getDocumentFirstPageId($documentId) {
-    $node = node_load($documentId);
     return;
   }
   
@@ -96,11 +87,11 @@ class ScriptoAdapterDrupal implements Scripto_Adapter_Interface {
   public function importDocumentTranscription($documentId, $text) {
     $node = node_load($documentId);
     
-    // Build the long_text field structure.
+    // Build the long_text field structure, in full HTML so no markup is 
+    // filtered out.
     $node->scripto_transcription[$node->language][0] = array(
       'value' => $text,
-      'format' => null,
-      'safe_value' => null,
+      'format' => 'full_html',
     );
     
     // Update the node with the new text.

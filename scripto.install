@@ -11,7 +11,7 @@ function scripto_install() {
   // Create the scripto_transcription field.
   $field = array(
     'field_name' => 'scripto_transcription',
-    'type' => 'text_long',
+    'type' => 'text_with_summary',
     'entity_types' => array('node'),
     'locked' => true,
   );
