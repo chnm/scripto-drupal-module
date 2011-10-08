@@ -35,25 +35,18 @@ function scripto_permission() {
  * Implements hook_menu().
  */
 function scripto_menu() {
-  $items['scripto/transcribe'] = array(
-    'title' => 'Transcribe',
-    'page callback' => 'drupal_get_form',
-    'page arguments' => array('scripto_transcribe'),
-    'access arguments' => array('access content'),
-    'type' => MENU_CALLBACK,
-  );
-  $items['scripto/login'] = array(
-    'title' => 'Scripto Login',
-    'page callback' => 'drupal_get_form',
-    'page arguments' => array('scripto_login'),
-    'access arguments' => array('access content'),
-    'type' => MENU_CALLBACK,
-  );
   $items['admin/config/scripto'] = array(
     'title' => 'Configure Scripto',
     'page callback' => 'drupal_get_form',
-    'page arguments' => array('scripto_config'),
+    'page arguments' => array('scripto_config_form'),
     'access arguments' => array('configure scripto'),
+  );
+  $items['scripto/transcribe'] = array(
+    'title' => 'Transcribe',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('scripto_transcribe_form'),
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
   );
   return $items;
 }
@@ -63,7 +56,7 @@ function scripto_menu() {
  * 
  * @see scripto_menu()
  */
-function scripto_config() {
+function scripto_config_form() {
   
   $form['scripto_zend_framework_path'] = array(
     '#type' => 'textfield',
@@ -97,18 +90,16 @@ function scripto_config() {
     '#default_value' => variable_get('scripto_node_types') ? variable_get('scripto_node_types') : array(),
   );
   
-  $form['#validate'][] = 'scripto_config_validate';
-  $form['#submit'][] = 'scripto_config_submit';
+  $form['#validate'][] = 'scripto_config_form_validate';
+  $form['#submit'][] = 'scripto_config_form_submit';
   
   return system_settings_form($form);
 }
 
 /**
- * Form validation handler for scripto_config().
- * 
- * @see scripto_config()
+ * Form validation handler for scripto_config_form().
  */
-function scripto_config_validate($form, &$form_state) {
+function scripto_config_form_validate($form, &$form_state) {
   $zend_framework_path = $form_state['values']['scripto_zend_framework_path'];
   $mediawiki_api_url = $form_state['values']['scripto_mediawiki_api_url'];
   $mediawiki_db_name = $form_state['values']['scripto_mediawiki_db_name'];
@@ -134,11 +125,9 @@ function scripto_config_validate($form, &$form_state) {
 }
 
 /**
- * Form submission handler for scripto_config().
- * 
- * @see scripto_config()
+ * Form submission handler for scripto_config_form().
  */
-function scripto_config_submit($form, &$form_state) {
+function scripto_config_form_submit($form, &$form_state) {
   variable_set('scripto_zend_framework_path', $form_state['values']['scripto_zend_framework_path']);
   variable_set('scripto_mediawiki_api_url', $form_state['values']['scripto_mediawiki_api_url']);
   variable_set('scripto_mediawiki_db_name', $form_state['values']['scripto_mediawiki_db_name']);
@@ -189,7 +178,7 @@ function scripto_config_submit($form, &$form_state) {
  * 
  * @see scripto_menu().
  */
-function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
+function scripto_transcribe_form($form, &$form_state, $node_id, $file_id) {
   
   // Set the Scripto document and page.
   $scripto = _scripto_get_scripto();
@@ -205,27 +194,27 @@ function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
   $node = node_load($node_id);
   $file = file_load($file_id);
   
-  // Zoom.it image viewer.
-  if (in_array($file->filemime, _scripto_get_filemime_zoomit())) {
-    $url = url('http://api.zoom.it/v1/content/', array('query' => array('url' => file_create_url($file->uri))));
-    $response = drupal_http_request($url);
-    $html = json_decode($response->data)->embedHtml;
-  
-  // Google Docs document viewer.
-  } else if (in_array($file->filemime, _scripto_get_filemime_googledocs())) {
-      $url = url('http://docs.google.com/viewer', array('query' => array('url' => file_create_url($file->uri), 'embed' => 'true')));
-      $html = '<iframe src="http://docs.google.com/viewer?embedded=true&url=' . urlencode($url) . '" width="500" height="600" style="border: none;"></iframe>';
-  
-  // No media viewer.
-  } else {
-    $html = '<p>No media viewer is available for ' . $file->filemime . ' files. ' . l('Click here', file_create_url($file->uri), array('attributes' => array('_target' => 'blank'))) . ' to open the file manually.</p>';
-  }
+  $form['node_title'] = array('#markup' => '<h2>' . l($node->title, 'node/' .$node_id) . ': ' . $file->filename . '</h2>');
   
   // Build the transcription form.
-  $form['node_title'] = array('#markup' => '<h2>' . l($node->title, 'node/' .$node_id) . ': ' . $file->filename . '</h2>');
-  $form['media_viewer'] = array('#markup' => $html);
-  
   if ($doc->canEditTranscriptionPage()) {
+    // Zoom.it image viewer.
+    if (in_array($file->filemime, _scripto_get_filemime_zoomit())) {
+      $url = url('http://api.zoom.it/v1/content/', array('query' => array('url' => file_create_url($file->uri))));
+      $response = drupal_http_request($url);
+      $html = json_decode($response->data)->embedHtml;
+    
+    // Google Docs document viewer.
+    } else if (in_array($file->filemime, _scripto_get_filemime_googledocs())) {
+        $url = url('http://docs.google.com/viewer', array('query' => array('url' => file_create_url($file->uri), 'embed' => 'true')));
+        $html = '<iframe src="http://docs.google.com/viewer?embedded=true&url=' . urlencode($url) . '" width="500" height="600" style="border: none;"></iframe>';
+    
+    // No media viewer.
+    } else {
+      $html = '<p>No media viewer is available for ' . $file->filemime . ' files. ' . l('Click here', file_create_url($file->uri), array('attributes' => array('_target' => 'blank'))) . ' to open the file manually.</p>';
+    }
+    
+    $form['media_viewer'] = array('#markup' => $html);
     $form['transcription'] = array(
       '#type' => 'textarea',
       '#title' => t('Transcription'),
@@ -235,32 +224,43 @@ function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
     );
     $form['submit'] = array('#type' => 'submit', '#value' => t('Save Transcription'));
     $form['logout'] = array('#markup' => l('Log out of Scripto', "scripto/transcribe/$node_id/$file_id", array('query' => array('logout' => null))));
+    $form['#submit'][] = 'scripto_transcribe_form_submit';
+  
+  // Access to MediaWiki is restricted. Show login form or access denied 
+  // message.
   } else {
+    
     if ($scripto->isLoggedIn()) {
-      $form['access_denied'] = array('#markup' => 'Access to this page is restricted.');
+      $form['access_denied'] = array('#markup' => 'Access to edit this transcription is restricted');
+    
     } else {
-      $form['login'] = array('#markup' => 'Access to this transcription is restricted. Please ' . l('log in', "scripto/login/$node_id/$file_id") . ' to transcribe.');
+      $form['access_denied'] = array('#markup' => 'Access to edit this transcription is restricted. Please log in to the Scripto transcription service.');
+      $form['scripto_username'] = array(
+        '#type' => 'textfield',
+        '#title' => t('Username'),
+        '#size' => 20,
+      );
+      $form['scripto_password'] = array(
+        '#type' => 'password',
+        '#title' => t('Password'),
+        '#size' => 20,
+      );
+      $form['submit'] = array('#type' => 'submit', '#value' => t('Login'));
+      $form['#validate'][] = 'scripto_login_form_validate';
+      $form['#submit'][] = 'scripto_login_form_submit';
     }
   }
   
-  // @see http://drupal.org/node/751826 under "Submitting Forms" to see why the 
-  // two values below count as hidden fields.
+  $form['current_transcription'] = array('#markup' => '<h2>Current Transcription</h2>' . $doc->getTranscriptionPageHtml());
   $form['node_id'] = array('#type' => 'value', '#value' => $node_id);
   $form['file_id'] = array('#type' => 'value', '#value' => $file_id);
-
-  $form['current_transcription'] = array('#markup' => '<h2>Current Transcription</h2>' . $doc->getTranscriptionPageHtml());
-  
-  $form['#submit'][] = 'scripto_transcribe_submit';
-  
   return $form;
 }
 
 /**
- * Form submission handler for scripto_transcribe().
- * 
- * @see scripto_transcribe()
+ * Form submission handler for scripto_transcribe_form().
  */
-function scripto_transcribe_submit($form, &$form_state) {
+function scripto_transcribe_form_submit($form, &$form_state) {
   $scripto = _scripto_get_scripto();
   $doc = $scripto->getDocument($form_state['values']['node_id']);
   $doc->setPage($form_state['values']['file_id']);
@@ -268,39 +268,11 @@ function scripto_transcribe_submit($form, &$form_state) {
 }
 
 /**
- * Menu callback: displays the scripto module login form.
- * 
- * @see scripto_menu().
+ * Form validation handler for scripto_transcribe_form() login.
  */
-function scripto_login($form, &$form_state, $node_id, $file_id) {
-  $scripto = _scripto_get_scripto();
-  
-  $form['scripto_username'] = array(
-    '#type' => 'textfield',
-    '#title' => t('Username'),
-  );
-  $form['scripto_password'] = array(
-    '#type' => 'password',
-    '#title' => t('Password'),
-  );
-  $form['node_id'] = array('#type' => 'value', '#value' => $node_id);
-  $form['file_id'] = array('#type' => 'value', '#value' => $file_id);
-  $form['submit'] = array('#type' => 'submit', '#value' => t('Login'));
-  
-  $form['#validate'][] = 'scripto_login_validate';
-  $form['#submit'][] = 'scripto_login_submit';
-  
-  return $form;
-}
-
-/**
- * Form validation handler for scripto_login().
- * 
- * @see scripto_login()
- */
-function scripto_login_validate($form, &$form_state) {
-  // Attempt the login.
+function scripto_login_form_validate($form, &$form_state) {
   try {
+    // Attempt the login.
     $scripto = _scripto_get_scripto();
     $scripto->login($form_state['values']['scripto_username'], $form_state['values']['scripto_password']);
   } catch (Scripto_Service_Exception $e) {
@@ -309,12 +281,10 @@ function scripto_login_validate($form, &$form_state) {
 }
 
 /**
- * Form submission handler for scripto_login().
- * 
- * @see scripto_login()
+ * Form submission handler for scripto_transcribe_form() login.
  */
-function scripto_login_submit($form, &$form_state) {
-  // The validation handler took care of everything; just redirect to 
+function scripto_login_form_submit($form, &$form_state) {
+  // The validation handler took care of everything; just redirect to the 
   // transcription page.
   drupal_goto("scripto/transcribe/{$form_state['values']['node_id']}/{$form_state['values']['file_id']}");
 }
@@ -353,8 +323,6 @@ function scripto_node_view_alter(&$build) {
 
 /**
  * Node build callback: displays the scripto module import transcription form.
- * 
- * @see scripto_menu().
  */
 function scripto_import_transcription($form, &$form_state, $node_id) {
   $form['node_id'] = array('#type' => 'value', '#value' => $node_id);
@@ -366,8 +334,6 @@ function scripto_import_transcription($form, &$form_state, $node_id) {
 
 /**
  * Form submission handler for scripto_import_transcription().
- * 
- * @see scripto_import_transcription()
  */
 function scripto_import_transcription_submit($form, &$form_state) {
   if (!user_access('import transcriptions')) {
