@@ -42,6 +42,13 @@ function scripto_menu() {
     'access arguments' => array('access content'),
     'type' => MENU_CALLBACK,
   );
+  $items['scripto/login'] = array(
+    'title' => 'Scripto Login',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('scripto_login'),
+    'access arguments' => array('access content'),
+    'type' => MENU_CALLBACK,
+  );
   $items['admin/config/scripto'] = array(
     'title' => 'Configure Scripto',
     'page callback' => 'drupal_get_form',
@@ -189,6 +196,11 @@ function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
   $doc = $scripto->getDocument($node_id);
   $doc->setPage($file_id);
   
+  // Log out of Scripto.
+  if (isset($_GET['logout'])) {
+    $scripto->logout();
+  }
+  
   // Get the node and file objects.
   $node = node_load($node_id);
   $file = file_load($file_id);
@@ -206,25 +218,38 @@ function scripto_transcribe($form, &$form_state, $node_id, $file_id) {
   
   // No media viewer.
   } else {
-    $html = '<p>No media viewer is available for ' . $file->filemime . ' files. <a href="' . file_create_url($file->uri) . '" target="_blank">Click here</a> to open the file manually.</p>';
+    $html = '<p>No media viewer is available for ' . $file->filemime . ' files. ' . l('Click here', file_create_url($file->uri), array('attributes' => array('_target' => 'blank'))) . ' to open the file manually.</p>';
   }
   
   // Build the transcription form.
-  $form['node_title'] = array('#markup' => '<h2><a href="' . url('node/' .$node_id) . '">' . $node->title . '</a>: ' . $file->filename . '</h2>');
+  $form['node_title'] = array('#markup' => '<h2>' . l($node->title, 'node/' .$node_id) . ': ' . $file->filename . '</h2>');
   $form['media_viewer'] = array('#markup' => $html);
-  $form['transcription'] = array(
-    '#type' => 'textarea',
-    '#title' => t('Transcription'),
-    '#default_value' =>  $doc->getTranscriptionPageWikitext(),
-    '#cols' => 60,
-    '#rows' => 16,
-  );
+  
+  if ($doc->canEditTranscriptionPage()) {
+    $form['transcription'] = array(
+      '#type' => 'textarea',
+      '#title' => t('Transcription'),
+      '#default_value' =>  $doc->getTranscriptionPageWikitext(),
+      '#cols' => 60,
+      '#rows' => 16,
+    );
+    $form['submit'] = array('#type' => 'submit', '#value' => t('Save Transcription'));
+    $form['logout'] = array('#markup' => l('Log out of Scripto', "scripto/transcribe/$node_id/$file_id", array('query' => array('logout' => null))));
+  } else {
+    if ($scripto->isLoggedIn()) {
+      $form['access_denied'] = array('#markup' => 'Access to this page is restricted.');
+    } else {
+      $form['login'] = array('#markup' => 'Access to this transcription is restricted. Please ' . l('log in', "scripto/login/$node_id/$file_id") . ' to transcribe.');
+    }
+  }
+  
   // @see http://drupal.org/node/751826 under "Submitting Forms" to see why the 
   // two values below count as hidden fields.
   $form['node_id'] = array('#type' => 'value', '#value' => $node_id);
   $form['file_id'] = array('#type' => 'value', '#value' => $file_id);
-  $form['submit'] = array('#type' => 'submit', '#value' => t('Save Transcription'));
+
   $form['current_transcription'] = array('#markup' => '<h2>Current Transcription</h2>' . $doc->getTranscriptionPageHtml());
+  
   $form['#submit'][] = 'scripto_transcribe_submit';
   
   return $form;
@@ -240,6 +265,58 @@ function scripto_transcribe_submit($form, &$form_state) {
   $doc = $scripto->getDocument($form_state['values']['node_id']);
   $doc->setPage($form_state['values']['file_id']);
   $doc->editTranscriptionPage($form_state['values']['transcription']);
+}
+
+/**
+ * Menu callback: displays the scripto module login form.
+ * 
+ * @see scripto_menu().
+ */
+function scripto_login($form, &$form_state, $node_id, $file_id) {
+  $scripto = _scripto_get_scripto();
+  
+  $form['scripto_username'] = array(
+    '#type' => 'textfield',
+    '#title' => t('Username'),
+  );
+  $form['scripto_password'] = array(
+    '#type' => 'password',
+    '#title' => t('Password'),
+  );
+  $form['node_id'] = array('#type' => 'value', '#value' => $node_id);
+  $form['file_id'] = array('#type' => 'value', '#value' => $file_id);
+  $form['submit'] = array('#type' => 'submit', '#value' => t('Login'));
+  
+  $form['#validate'][] = 'scripto_login_validate';
+  $form['#submit'][] = 'scripto_login_submit';
+  
+  return $form;
+}
+
+/**
+ * Form validation handler for scripto_login().
+ * 
+ * @see scripto_login()
+ */
+function scripto_login_validate($form, &$form_state) {
+  // Attempt the login.
+  try {
+    $scripto = _scripto_get_scripto();
+    $scripto->login($form_state['values']['scripto_username'], $form_state['values']['scripto_password']);
+  } catch (Scripto_Service_Exception $e) {
+    form_set_error('', $e->getMessage());
+  }
+}
+
+/**
+ * Form submission handler for scripto_login().
+ * 
+ * @see scripto_login()
+ */
+function scripto_login_submit($form, &$form_state) {
+  // The validation handler took care of everything; just redirect to 
+  // transcription page.
+  drupal_goto("scripto/transcribe/{$form_state['values']['node_id']}/{$form_state['values']['file_id']}");
 }
 
 /**
@@ -260,8 +337,7 @@ function scripto_node_view_alter(&$build) {
   $html = '<h3>Transcribe</h3>';
   $html .= '<ol>';
   foreach ($items as $item) {
-    $url = url('scripto/transcribe/' . $build['#node']->nid . '/' . $item['fid']);
-    $html .= '<li><a href="' . $url . '">' . $item['filename'] . '</a></li>';
+    $html .= '<li>' . l($item['filename'], 'scripto/transcribe/' . $build['#node']->nid . '/' . $item['fid']) . '</li>';
   }
   $html .= '</ol>';
   $build['transcription_page_list'] = array(
