@@ -343,7 +343,7 @@ function scripto_node_view_alter(&$build) {
  */
 function scripto_import_transcription($form, &$form_state, $node_id) {
   $form['node_id'] = array('#type' => 'value', '#value' => $node_id);
-  $form['submit'] = array('#type' => 'submit', '#value' => t('Import All Transcriptions'));
+  $form['submit'] = array('#type' => 'submit', '#value' => t('Import Transcriptions'));
   $form['#submit'][] = 'scripto_import_transcription_submit';
   $form['#weight'] = '20';
   return $form;
@@ -361,6 +361,7 @@ function scripto_import_transcription_submit($form, &$form_state) {
   
   // Export in HTML to preserve formatting.
   $doc->export('html');
+  drupal_set_message('The transcriptions have been imported.');
 }
 
 /**
