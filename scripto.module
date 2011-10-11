@@ -210,8 +210,8 @@ function scripto_transcribe_form($form, &$form_state, $node_id, $file_id) {
     
     // Google Docs document viewer.
     } else if (in_array($file->filemime, _scripto_get_filemime_googledocs())) {
-        $url = url('http://docs.google.com/viewer', array('query' => array('url' => file_create_url($file->uri), 'embed' => 'true')));
-        $html = '<iframe src="http://docs.google.com/viewer?embedded=true&url=' . urlencode($url) . '" width="500" height="600" style="border: none;"></iframe>';
+        $url = url('http://docs.google.com/viewer', array('query' => array('url' => file_create_url($file->uri), 'embedded' => 'true')));
+        $html = '<iframe src="' . $url . '" width="600" height="600" style="border: none;"></iframe>';
     
     // No media viewer.
     } else {
