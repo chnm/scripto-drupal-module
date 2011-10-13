@@ -24,7 +24,6 @@ function scripto_install() {
 function scripto_uninstall() {
   variable_del('scripto_zend_framework_path');
   variable_del('scripto_mediawiki_api_url');
-  variable_del('scripto_mediawiki_db_name');
   variable_del('scripto_node_types');
   
   // Delete the Scripto transcription field and all its instances.
