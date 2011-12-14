@@ -87,6 +87,8 @@ class ScriptoAdapterDrupal implements Scripto_Adapter_Interface {
   public function importDocumentTranscription($documentId, $text) {
     $node = node_load($documentId);
     
+    $text = Scripto::removeNewPPLimitReports($text);
+    
     // Build the long_text field structure, in full HTML so no markup is 
     // filtered out.
     $node->scripto_transcription[$node->language][0] = array(
