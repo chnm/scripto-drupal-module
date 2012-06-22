@@ -215,6 +215,9 @@ function scripto_transcribe_form($form, &$form_state, $node_id, $file_id) {
       '#rows' => 16,
     );
     $form['submit'] = array('#type' => 'submit', '#value' => t('Save Transcription'));
+    if ($scripto->canExport()) {
+        $form['scripto_wiki'] = array('#markup' => l('View wiki page', $doc->getTranscriptionPageMediawikiUrl()) . '. ');
+    }
     if ($scripto->isLoggedIn()) {
       $form['scripto_logout'] = array('#markup' => l('Log out, ' . $scripto->getUserName(), "scripto/transcribe/$node_id/$file_id", array('query' => array('logout' => null))));
     } else {
